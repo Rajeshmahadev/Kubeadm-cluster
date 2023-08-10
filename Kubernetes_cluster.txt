@@ -1,0 +1,180 @@
+--------Set hostname---------------
+
+$sudo hostnamectl set-hostname "k8sworker"
+
+-----Disable swap & add kernel settings-----
+
+$ sudo swapoff -a
+$ sudo sed -i '/ swap / s/^\(.*\)$/#\1/g' /etc/fstab
+
+-Load the following kernel modules on all the nodes,--------
+
+$ sudo tee /etc/modules-load.d/containerd.conf <<EOF
+overlay
+br_netfilter
+EOF
+
+$ sudo modprobe overlay
+$ sudo modprobe br_netfilter
+
+
+-----Set the following Kernel parameters for Kubernetes, run beneath tee command----
+
+$ sudo tee /etc/sysctl.d/kubernetes.conf <<EOF
+net.bridge.bridge-nf-call-ip6tables = 1
+net.bridge.bridge-nf-call-iptables = 1
+net.ipv4.ip_forward = 1
+EOF 
+
+
+-------Reload the above changes, run-----
+$ sudo sysctl --system
+
+
+
+-----Install containerd run time-------
+
+$ sudo apt install -y curl gnupg2 software-properties-common apt-transport-https ca-certificates
+
+
+----- Update the system-------
+
+$ sudo apt-get update && sudo apt-get upgrade -y
+
+-----Enable docker repository & Install Docker----
+
+$ sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmour -o /etc/apt/trusted.gpg.d/docker.gpg
+$ sudo add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
+$ sudo apt-get install -y apt-transport-https ca-certificates curl gnupg-agent software-properties-common
+$ curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
+$ sudo add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
+$ sudo apt-get update && sudo apt-get install -y docker-ce docker-ce-cli containerd.io
+
+
+
+----run following apt command to install containerd-----
+
+$ sudo apt update
+$ sudo apt install -y containerd.io
+
+
+
+-----Configure containerd so that it starts using systemd as cgroup.---
+
+$ containerd config default | sudo tee /etc/containerd/config.toml >/dev/null 2>&1
+$ sudo sed -i 's/SystemdCgroup \= false/SystemdCgroup \= true/g' /etc/containerd/config.toml
+
+
+
+------Restart and enable containerd service----
+
+$ sudo systemctl restart containerd
+$ sudo systemctl enable containerd
+
+
+------Add apt repository for Kubernetes-------
+
+------ following commands to add apt repository for Kubernetes-----
+
+$ curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo gpg --dearmour -o /etc/apt/trusted.gpg.d/kubernetes-xenial.gpg
+$ sudo apt-add-repository "deb http://apt.kubernetes.io/ kubernetes-xenial main"
+
+
+----- Install Kubernetes components Kubectl, kubeadm & kubelet-----
+
+$ sudo apt update
+$ sudo apt install -y kubelet kubeadm kubectl
+$ sudo apt-mark hold kubelet kubeadm kubectl
+
+
+----- Initialize Kubernetes cluster with Kubeadm command---------
+
+$ sudo kubeadm init --pod-network-cidr=10.244.0.0/16
+
+
+---To start interacting with cluster, run following commands from the master node,-------
+
+$ mkdir -p $HOME/.kube
+$ sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+$ sudo chown $(id -u):$(id -g) $HOME/.kube/config
+
+
+ ------kubectl commands to view cluster and node status-------
+
+$ kubectl cluster-info
+$ kubectl get nodes
+
+
+------- Install Calico Pod Network Add-on-------
+
+-----for calico if you want you can change------
+$ kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.25.0/manifests/calico.yaml ---
+
+
+----Join both the worker nodes to the cluster, command is already there is output, just copy paste on the worker nodes,-----
+
+$ sudo kubeadm join token paste
+
+sudo -i
+swapoff -a
+exit
+
+sudo su -
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis-master-dep
+  labels:
+    apps: redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+      role: master
+      tier: backend
+  template:
+    metadata:
+      labels:
+        app: redis
+        role: master
+        tier: backend
+    spec:
+      containers:
+      - name: redis-master-cont
+        image: k8s.gcr.io/redis:e2e
+        resources:
+          requests:
+            cpu: 100m
+            memory: 100Mi
+        ports:
+        - containerPort: 6379
+        volumeMounts:
+        - name: test-vol
+          mountPath: /test-vol
+      volumes:
+      - name: test-vol
+        persistentVolumeClaim:
+          claimName: host-pvc
+
